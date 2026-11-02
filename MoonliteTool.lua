@@ -1107,13 +1107,6 @@ local function refreshPackages()
     status.Text = "Found " .. #found .. " stream package(s)."
 end
 
-local refreshButton = makeButton(
-    "Refresh",
-    UDim2.new(1, -102, 0, 40),
-    UDim2.fromOffset(90, 26),
-    Color3.fromRGB(75, 82, 98)
-)
-
 refreshButton.MouseButton1Click:Connect(refreshPackages)
 
 --==================================================
@@ -1232,27 +1225,6 @@ end
 --==================================================
 -- ACTION BUTTONS
 --==================================================
-
-local acquireButton = makeButton(
-    "Acquire + Decode + Merge",
-    UDim2.fromOffset(12, 276),
-    UDim2.new(1, -24, 0, 38),
-    Color3.fromRGB(43, 126, 91)
-)
-
-local importButton = makeButton(
-    "Import Existing Capture",
-    UDim2.fromOffset(12, 322),
-    UDim2.new(0.5, -18, 0, 34),
-    Color3.fromRGB(69, 91, 128)
-)
-
-local exportButton = makeButton(
-    "Export with SaveInstance",
-    UDim2.new(0.5, 6, 0, 322),
-    UDim2.new(0.5, -18, 0, 34),
-    Color3.fromRGB(112, 79, 145)
-)
 
 acquireButton.MouseButton1Click:Connect(function()
     process(true)

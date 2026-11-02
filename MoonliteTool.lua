@@ -1364,6 +1364,13 @@ local function process(useAcquisition)
             local manifest = manifestOrError
             local windowFrames, windowCount = getStreamLayout(manifest)
 
+            if (not windowFrames or not windowCount)
+                and manifest.Metadata
+                and manifest.Metadata.Stream ~= nil
+            then
+                error("Stream metadata exists, but its layout is invalid. Refusing to rebuild it as a Direct document.")
+            end
+
             if not windowFrames or not windowCount then
                 -- A non-stream cutscene already contains its complete timeline.
                 -- Re-encode it into a fresh Moonlite container without window

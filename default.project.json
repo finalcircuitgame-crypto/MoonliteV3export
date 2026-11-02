@@ -1,0 +1,21 @@
+{
+  "name": "MoonliteCutsceneTool",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "MoonliteCutsceneTool": {
+        "$className": "Folder",
+        "MoonliteLocalCapture": { "$path": "src/MoonliteLocalCapture.lua" },
+        "MoonliteStreamMerger": { "$path": "src/MoonliteStreamMerger.lua" }
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "MoonliteCutsceneTool": { "$path": "src/Main.client.lua" }
+      }
+    }
+  }
+}

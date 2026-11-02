@@ -992,5 +992,3 @@ gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 refreshPackages()
 
 print("[Moonlite Cutscene Tool] Loaded.")
-
-Does this make gui

@@ -26,17 +26,24 @@ local Moonlite = RS.Client.Modules.MoonliteV3
 
 local Container = require(Moonlite.Container)
 local Document = require(Moonlite.Document)
-local Stream = require(Moonlite.Stream)
+
+-- Stream support is optional. Direct Moonlite documents do not need Stream.lua
+-- or the RequestCutsceneChunk RemoteFunction to exist.
+local StreamModule = Moonlite:FindFirstChild("Stream")
+local Stream = if StreamModule then require(StreamModule) else nil
 
 local CutScenes = RS.Assets.CutScenes
 
-local RequestRemote = RS.Network.CutScenes
-    :WaitForChild("RF:RequestCutsceneChunk")
+local function getRequestRemote()
+    local network = RS:FindFirstChild("Network")
+    local cutsceneNetwork = network and network:FindFirstChild("CutScenes")
+    local remote = cutsceneNetwork and cutsceneNetwork:FindFirstChild("RF:RequestCutsceneChunk")
 
-assert(
-    RequestRemote:IsA("RemoteFunction"),
-    "RequestCutsceneChunk is not a RemoteFunction"
-)
+    assert(remote, "Stream capture remote is unavailable.")
+    assert(remote:IsA("RemoteFunction"), "RequestCutsceneChunk is not a RemoteFunction")
+
+    return remote
+end
 
 --==================================================
 -- EXECUTOR ENVIRONMENT
@@ -111,7 +118,7 @@ local function validateDocument(document, label)
 
     local errors = {}
 
-    for _, issue in ipairs(issues) do
+    for _, issue in ipairs(issues or {}) do
         if issue.Severity == "Error" then
             table.insert(
                 errors,
@@ -129,6 +136,175 @@ local function validateDocument(document, label)
         label .. " validation failed:\n"
         .. table.concat(errors, "\n")
     )
+end
+
+local function getStreamLayout(document)
+    if not Stream or type(Stream.Layout) ~= "function" then
+        return nil, nil
+    end
+
+    local ok, windowFrames, windowCount = pcall(Stream.Layout, document)
+
+    if not ok then
+        return nil, nil
+    end
+
+    return windowFrames, windowCount
+end
+
+local function inspectMissingChunks(scene)
+    local details = {
+        Expected = nil,
+        Missing = {},
+        Invalid = {},
+    }
+
+    local metadataOK, metadata = pcall(Container.GetMetadata, scene)
+    if metadataOK and type(metadata) == "table" then
+        details.Expected = tonumber(metadata.ChunkCount)
+    end
+
+    local dataFolder = scene:FindFirstChild("_MoonliteV3Data")
+
+    if not dataFolder then
+        if details.Expected and details.Expected > 0 then
+            for index = 1, details.Expected do
+                table.insert(details.Missing, index)
+            end
+        end
+        return details
+    end
+
+    if details.Expected then
+        for index = 1, details.Expected do
+            local chunk = dataFolder:FindFirstChild(tostring(index))
+
+            if not chunk then
+                table.insert(details.Missing, index)
+            elseif not chunk:IsA("StringValue") then
+                table.insert(details.Invalid, index)
+            elseif chunk.Value == "" then
+                table.insert(details.Invalid, index)
+            end
+        end
+    end
+
+    return details
+end
+
+local function describeContainerFailure(scene, readError)
+    local details = inspectMissingChunks(scene)
+    local parts = {
+        "Container.Read failed: " .. tostring(readError),
+    }
+
+    if details.Expected then
+        table.insert(parts, "Expected chunks: " .. details.Expected)
+    end
+
+    if #details.Missing > 0 then
+        local labels = {}
+        for _, index in ipairs(details.Missing) do
+            table.insert(labels, tostring(index))
+        end
+        table.insert(parts, "Missing chunk(s): " .. table.concat(labels, ", "))
+    end
+
+    if #details.Invalid > 0 then
+        local labels = {}
+        for _, index in ipairs(details.Invalid) do
+            table.insert(labels, tostring(index))
+        end
+        table.insert(parts, "Empty/invalid chunk(s): " .. table.concat(labels, ", "))
+    end
+
+    return table.concat(parts, " | "), details
+end
+
+local function classifyScene(scene)
+    local readOK, document = pcall(Container.Read, scene)
+
+    if not readOK then
+        local reason, chunkDetails = describeContainerFailure(scene, document)
+        return {
+            Mode = "Incomplete",
+            Error = reason,
+            ChunkDetails = chunkDetails,
+        }
+    end
+
+    local windowFrames, windowCount = getStreamLayout(document)
+
+    if windowFrames and windowCount then
+        return {
+            Mode = "Stream",
+            Document = document,
+            WindowFrames = windowFrames,
+            Count = windowCount,
+        }
+    end
+
+    local validOK, valid, issues = pcall(Document.Validate, document)
+
+    if validOK and valid then
+        if document.Metadata and document.Metadata.Stream ~= nil then
+            return {
+                Mode = "Invalid",
+                Error = "The document has stream metadata, but Stream.Layout could not read its layout.",
+            }
+        end
+
+        return {
+            Mode = "Direct",
+            Document = document,
+            Count = document.Frames or 0,
+        }
+    end
+
+    return {
+        Mode = "Invalid",
+        Error = "Document validation failed: " .. tostring(issues),
+    }
+end
+
+local function countDocumentKeys(document)
+    local total = 0
+
+    for _, track in ipairs(document.Tracks or {}) do
+        total += #(track.Keys or {})
+    end
+
+    return total
+end
+
+local function createWorkspaceOutput(package, document, mode, stats, log)
+    validateDocument(document, mode .. " document")
+
+    local outputScene = Container.Create(document)
+    outputScene.Name = "Scene"
+
+    local outputName = package.Name .. "_Reconstructed"
+    local previous = Workspace:FindFirstChild(outputName)
+
+    if previous then
+        previous:Destroy()
+    end
+
+    local folder = Instance.new("Folder")
+    folder.Name = outputName
+    folder:SetAttribute("MoonliteGenerated", true)
+    folder:SetAttribute("SourcePackage", package.Name)
+    folder:SetAttribute("ReconstructionMode", mode)
+    folder.Parent = Workspace
+    outputScene.Parent = folder
+
+    log("Created: " .. folder:GetFullName())
+    log("Mode: " .. mode)
+    log("Frames: " .. tostring(document.Frames))
+    log("Tracks: " .. #(document.Tracks or {}))
+    log("Keys: " .. tostring(stats.TotalKeys or countDocumentKeys(document)))
+
+    return folder
 end
 
 --==================================================
@@ -231,6 +407,9 @@ end
 --==================================================
 
 local function acquireCutscene(package, manifest, captureRoot, log)
+    assert(Stream, "Stream.lua is not available for stream capture.")
+
+    local RequestRemote = getRequestRemote()
     local streamId = package:GetAttribute("MoonliteStreamId")
 
     local windowCount =
@@ -357,6 +536,8 @@ end
 --==================================================
 
 local function importExisting(package, manifest, captureRoot, log)
+    assert(Stream, "Stream.lua is not available for stream capture import.")
+
     local _, windowCount = Stream.Layout(manifest)
 
     local readfile = requireAPI("readfile")
@@ -1026,6 +1207,7 @@ log("Interface initialized.")
 --==================================================
 
 local selectedPackage = nil
+local selectedPackageInfo = nil
 local outputFolder = nil
 local busy = false
 
@@ -1046,20 +1228,10 @@ local function refreshPackages()
         local scene = package:FindFirstChild("Scene")
 
         if scene and Container.IsContainer(scene) then
-            local ok, manifest = pcall(function()
-                return Container.Read(scene)
-            end)
-
-            if ok then
-                local frames, count = Stream.Layout(manifest)
-
-                if frames and count then
-                    table.insert(found, {
-                        Package = package,
-                        Count = count,
-                    })
-                end
-            end
+            local info = classifyScene(scene)
+            info.Package = package
+            info.Scene = scene
+            table.insert(found, info)
         end
     end
 
@@ -1076,10 +1248,19 @@ local function refreshPackages()
 
         button.TextColor3 = Color3.fromRGB(226, 235, 248)
         button.TextXAlignment = Enum.TextXAlignment.Left
+        local modeLabel = if entry.Mode == "Stream" then
+            string.format("STREAM • %d windows", entry.Count)
+            elseif entry.Mode == "Direct" then
+                string.format("DIRECT • %d frames", entry.Count)
+            elseif entry.Mode == "Incomplete" then
+                "INCOMPLETE • chunk data missing"
+            else
+                "INVALID • document check failed"
+
         button.Text = string.format(
-            "   %s       •       %d windows",
+            "   %s       •       %s",
             entry.Package.Name,
-            entry.Count
+            modeLabel
         )
 
         button.Font = Enum.Font.Gotham
@@ -1089,22 +1270,58 @@ local function refreshPackages()
 
         button.MouseButton1Click:Connect(function()
             selectedPackage = entry.Package
+            selectedPackageInfo = entry
 
             for _, sibling in ipairs(packageList:GetChildren()) do
                 if sibling:IsA("TextButton") then
                     sibling.BackgroundColor3 = Color3.fromRGB(35, 43, 58)
                 end
             end
-            button.BackgroundColor3 = Color3.fromRGB(47, 91, 134)
+            button.BackgroundColor3 = if entry.Mode == "Incomplete" or entry.Mode == "Invalid"
+                then Color3.fromRGB(108, 57, 62)
+                else Color3.fromRGB(47, 91, 134)
 
             selectedLabel.Text = "SELECTED  /  " .. entry.Package.Name
-            status.Text = "Ready — " .. entry.Package.Name
-            statusDot.BackgroundColor3 = Color3.fromRGB(100, 194, 150)
-            log("Selected package: " .. entry.Package.Name)
+            status.Text = entry.Mode .. " — " .. entry.Package.Name
+            statusDot.BackgroundColor3 = if entry.Mode == "Incomplete" or entry.Mode == "Invalid"
+                then Color3.fromRGB(235, 91, 91)
+                else Color3.fromRGB(100, 194, 150)
+
+            if entry.Mode == "Stream" then
+                acquireButton.Text = "ACQUIRE + DECODE + MERGE"
+                importButton.Visible = true
+                log("Selected stream package: " .. entry.Package.Name)
+            elseif entry.Mode == "Direct" then
+                acquireButton.Text = "REBUILD DIRECT SCENE"
+                importButton.Visible = false
+                log("Selected direct package: " .. entry.Package.Name)
+                log("No stream windows or chunk requests are required.")
+            else
+                acquireButton.Text = "INSPECT CONTAINER"
+                importButton.Visible = false
+                log(entry.Error or "Package is not readable.")
+            end
         end)
     end
 
-    status.Text = "Found " .. #found .. " stream package(s)."
+    local streamCount, directCount, incompleteCount = 0, 0, 0
+    for _, entry in ipairs(found) do
+        if entry.Mode == "Stream" then
+            streamCount += 1
+        elseif entry.Mode == "Direct" then
+            directCount += 1
+        elseif entry.Mode == "Incomplete" then
+            incompleteCount += 1
+        end
+    end
+
+    status.Text = string.format(
+        "Found %d packages • %d stream • %d direct • %d incomplete",
+        #found,
+        streamCount,
+        directCount,
+        incompleteCount
+    )
 end
 
 refreshButton.MouseButton1Click:Connect(refreshPackages)
@@ -1128,17 +1345,59 @@ local function process(useAcquisition)
 
     task.spawn(function()
         local ok, err = pcall(function()
-            validateFilesystem()
-
             local package = selectedPackage
             local manifestScene = package:FindFirstChild("Scene")
 
             assert(
                 manifestScene and Container.IsContainer(manifestScene),
-                "Original Scene manifest missing"
+                "Original Scene container missing"
             )
 
-            local manifest = Container.Read(manifestScene)
+            local readOK, manifestOrError = pcall(Container.Read, manifestScene)
+
+            if not readOK then
+                local reason = describeContainerFailure(manifestScene, manifestOrError)
+                log(reason)
+                error(reason)
+            end
+
+            local manifest = manifestOrError
+            local windowFrames, windowCount = getStreamLayout(manifest)
+
+            if not windowFrames or not windowCount then
+                -- A non-stream cutscene already contains its complete timeline.
+                -- Re-encode it into a fresh Moonlite container without window
+                -- requests, packet import, or boundary-key merging.
+                log("Direct mode: complete document found; no stream acquisition needed.")
+                status.Text = "Rebuilding direct Scene..."
+                statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
+
+                local directDocument = Document.Clone(manifest)
+                directDocument.Metadata = directDocument.Metadata or {}
+                directDocument.Metadata.Stream = nil
+
+                validateDocument(directDocument, "Direct document")
+
+                local stats = {
+                    TotalKeys = countDocumentKeys(directDocument),
+                    DuplicateKeys = 0,
+                }
+
+                outputFolder = createWorkspaceOutput(
+                    package,
+                    directDocument,
+                    "Direct",
+                    stats,
+                    log
+                )
+
+                status.Text = "Complete — direct Scene rebuilt in Workspace."
+                statusDot.BackgroundColor3 = Color3.fromRGB(83, 204, 145)
+                return
+            end
+
+            -- Stream packages keep the original acquisition/import/merge path.
+            validateFilesystem()
 
             local captureRoot = pathBox.Text
             assert(captureRoot ~= "", "Capture folder is empty")
@@ -1146,7 +1405,7 @@ local function process(useAcquisition)
             local windows
 
             if useAcquisition then
-                log("Starting cutscene acquisition...")
+                log("Starting stream acquisition...")
 
                 windows = acquireCutscene(
                     package,
@@ -1155,7 +1414,7 @@ local function process(useAcquisition)
                     log
                 )
             else
-                log("Importing existing captures...")
+                log("Importing existing stream captures...")
 
                 windows = importExisting(
                     package,
@@ -1168,10 +1427,7 @@ local function process(useAcquisition)
             status.Text = "Merging windows..."
             statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
 
-            local merged, stats = mergeWindows(
-                manifest,
-                windows
-            )
+            local merged, stats = mergeWindows(manifest, windows)
 
             log("Document validation passed.")
             log("Unique keys: " .. stats.TotalKeys)
@@ -1180,32 +1436,13 @@ local function process(useAcquisition)
             status.Text = "Creating final Scene..."
             statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
 
-            local outputScene = Container.Create(merged)
-            outputScene.Name = "Scene"
-
-            local outputName =
-                package.Name .. "_Reconstructed"
-
-            local previous = Workspace:FindFirstChild(outputName)
-
-            if previous then
-                previous:Destroy()
-            end
-
-            local folder = Instance.new("Folder")
-            folder.Name = outputName
-
-            folder:SetAttribute("MoonliteGenerated", true)
-            folder:SetAttribute("SourcePackage", package.Name)
-
-            folder.Parent = Workspace
-            outputScene.Parent = folder
-
-            outputFolder = folder
-
-            log("Created: " .. folder:GetFullName())
-            log("Frames: " .. tostring(merged.Frames))
-            log("Tracks: " .. #merged.Tracks)
+            outputFolder = createWorkspaceOutput(
+                package,
+                merged,
+                "Stream",
+                stats,
+                log
+            )
 
             status.Text = "Complete — reconstructed Scene is in Workspace."
             statusDot.BackgroundColor3 = Color3.fromRGB(83, 204, 145)

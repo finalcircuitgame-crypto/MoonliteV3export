@@ -52,7 +52,7 @@ ReplicatedStorage
 7. Verifies each decoded window with `Stream.AssertWindow`.
 8. Reassembles the full document using the stream-aware merge algorithm described below.
 9. Creates a new Moonlite `Scene` and parents it under a generated folder in `Workspace`.
-10. Offers a SaveInstance export of that generated folder.
+10. Offers a model export of that generated folder using [Universal Syn Save Instance](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance). The engine is downloaded and compiled only when the export button is pressed; the tool passes the reconstructed Workspace folder as the target Instance.
 
 ## GUI controls
 
@@ -61,7 +61,7 @@ ReplicatedStorage
 - **Local capture folder** — sets the root directory; defaults to `MoonliteCapture`.
 - **Acquire + Decode + Merge** — requests all windows, saves them, decodes them, merges them, and creates the Workspace result.
 - **Import Existing Capture** — skips the acquisition requests and uses packet files already saved locally.
-- **Export with SaveInstance** — calls `saveinstance({ Object = outputFolder })` for the generated Workspace folder.
+- **Export with Universal Syn Save Instance** — downloads `saveinstance.luau` from the linked repository on first use, then calls the returned `synsaveinstance(outputFolder)` function. Passing the generated Folder Instance directly makes it the export target; the rest of the DataModel is not selected.
 
 ## Local capture layout
 
@@ -115,7 +115,9 @@ Workspace
             └── ...
 ```
 
-The export button passes this generated folder as the `Object` to SaveInstance. The exact exported filename, extension, and destination are determined by the installed SaveInstance implementation and its settings.
+The export button uses [Universal Syn Save Instance](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance). Its engine is fetched lazily from `saveinstance.luau` and called with the generated folder Instance directly, which the library documents as the `Object` option for a model export. The exact exported filename, extension, and destination are determined by the library's options and executor filesystem implementation.
+
+The project must retain the required attribution and license notices from Universal Syn Save Instance. Required credit string: `UniversalSynSaveInstance https://discord.gg/wx4ThpAsmw`. See the [USSI license](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance/blob/main/LICENSE).
 
 ## Troubleshooting
 

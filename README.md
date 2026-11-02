@@ -4,7 +4,7 @@ Executor-side GUI for capturing, decoding, merging, and exporting Moonlite V3 cu
 
 ## Load with `loadstring`
 
-If this repository is public, run this one-line loader in Xeno:
+Run this one-line loader in Xeno:
 
 ```lua
 loadstring(game:HttpGet("https://raw.githubusercontent.com/finalcircuitgame-crypto/MoonliteV3export/main/MoonliteTool.lua"))()
@@ -14,7 +14,7 @@ This downloads and executes the latest `MoonliteTool.lua` from the repository's 
 
 ### Important: repository visibility
 
-This repository is currently **private**. Roblox executor HTTP requests do not automatically authenticate as your GitHub account, so the raw URL above will not be readable while the repository remains private.
+This repository is public, so the raw GitHub URL can be fetched without an account token.
 
 To use that exact one-line loader, either:
 - make the repository public; or
@@ -29,7 +29,7 @@ If you want to keep the repository private, open `MoonliteTool.lua` in your loca
 - Xeno or another executor environment that supports `loadstring` and `game:HttpGet` for the loader method.
 - Executor filesystem functions: `isfolder`, `makefolder`, `isfile`, `readfile`, and `writefile`.
 - `saveinstance` for the model-export button.
-- The game's Moonlite modules at:
+- The game's Moonlite Container and Document modules at:
 
 ```text
 ReplicatedStorage
@@ -38,31 +38,35 @@ ReplicatedStorage
         └── MoonliteV3
             ├── Container
             ├── Document
-            └── Stream
+            └── Stream (only required for stream packages)
 ```
 
 ## What the tool does
 
-1. Scans `ReplicatedStorage.Assets.CutScenes` for packages containing a valid Moonlite `Scene` manifest.
-2. Displays stream-enabled packages in the GUI, including their window counts.
-3. Reads each selected package's `MoonliteStreamId` and `MoonliteStreamWindowCount` attributes.
-4. Requests the package's stream windows using the game's `ReplicatedStorage.Network.CutScenes["RF:RequestCutsceneChunk"]` RemoteFunction.
-5. Saves the returned packet data locally under `MoonliteCapture/<PackageName>/`.
-6. Reconstructs and decodes each packet using `Stream.SceneFromPacket` and `Container.Read`.
-7. Verifies each decoded window with `Stream.AssertWindow`.
-8. Reassembles the full document using the stream-aware merge algorithm described below.
-9. Creates a new Moonlite `Scene` and parents it under a generated folder in `Workspace`.
-10. Offers a model export of that generated folder using [Universal Syn Save Instance](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance). The engine is downloaded and compiled only when the export button is pressed; the tool passes the reconstructed Workspace folder as the target Instance.
+1. Scans `ReplicatedStorage.Assets.CutScenes` for Moonlite `Scene` containers and classifies them as **Stream**, **Direct**, **Incomplete**, or **Invalid**.
+2. Stream packages use `MoonliteStreamId`, `MoonliteStreamWindowCount`, and the game's `RF:RequestCutsceneChunk` RemoteFunction. The remote is resolved only when stream capture is requested.
+3. Direct packages already contain a complete timeline document. The tool reads the document with `Container.Read`, validates it with `Document.Validate`, clones it, and re-encodes it with `Container.Create`. No stream metadata, window requests, packet imports, or boundary-key merge are needed.
+4. Stream packets are saved locally under `MoonliteCapture/<PackageName>/`, decoded with `Stream.SceneFromPacket` and `Container.Read`, and verified with `Stream.AssertWindow`.
+5. Stream windows are reassembled using the stream-aware merge algorithm described below.
+6. Both modes create a fresh Moonlite `Scene` under `Workspace/<PackageName>_Reconstructed`.
+7. The generated folder can be exported using [Universal Syn Save Instance](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance). The engine is downloaded only when export is requested.
 
 ## GUI controls
 
 - **Refresh** — rescans `ReplicatedStorage.Assets.CutScenes`.
-- **Cutscene list** — selects a discovered stream-enabled package.
+- **Cutscene list** — selects a Stream, Direct, Incomplete, or Invalid package.
 - **Local capture folder** — sets the root directory; defaults to `MoonliteCapture`.
-- **Acquire + Decode + Merge** — requests all windows, saves them, decodes them, merges them, and creates the Workspace result.
-- **Import Existing Capture** — skips the acquisition requests and uses packet files already saved locally.
+- **Acquire + Decode + Merge** — for Stream packages, requests and merges the windows; for Direct packages, rebuilds the complete document immediately without stream calls.
+- **Import Existing Capture** — imports previously saved Stream packets. It is hidden for Direct packages because they have no windows to import.
 - **Export with Universal Syn Save Instance** — downloads `saveinstance.luau` from the linked repository on first use, then calls the returned `synsaveinstance(outputFolder)` function. Passing the generated Folder Instance directly makes it the export target; the rest of the DataModel is not selected.
 
+## Direct versus Stream packages
+
+A **Direct** package stores the complete animation document in its `Scene` container. The tool does not call `RF:RequestCutsceneChunk`; it validates the decoded document and uses `Container.Create` to generate a fresh container. This rebuilds the chunk layout for the output while preserving the document's tracks, keys, targets, cues, media, and other metadata.
+
+A **Stream** package stores a manifest plus separately requested windows. It still requires the Stream module, valid stream attributes, and the existing packet acquisition/import pipeline.
+
+An **Incomplete** package is shown in the list with its container error. When the metadata exposes `ChunkCount`, the diagnostic reports missing or empty numbered entries under `_MoonliteV3Data`. Re-encoding can repair the output container only after `Container.Read` succeeds. If a source chunk is genuinely absent (for example, chunk `1`), the tool cannot recreate its contents from the remaining chunks or from the manifest; it needs an authoritative copy of that chunk or of the original complete container.
 ## Local capture layout
 
 For a package named `NIGHT1TESTING`, files are written as:
@@ -128,12 +132,16 @@ The project must retain the required attribution and license notices from Univer
 
 **The cutscene list is empty**
 - The script currently scans `ReplicatedStorage.Assets.CutScenes` only.
-- A package must have a `Scene` StringValue containing a valid Moonlite V3 container and stream manifest.
+- A package must have a `Scene` StringValue containing a Moonlite V3 container. Direct packages do not need stream metadata or the Stream module.
 
 **A window request fails**
 - Check the returned status and packet data.
 - Confirm the selected package has valid `MoonliteStreamId` and `MoonliteStreamWindowCount` attributes.
 - Check whether the server expects a different request limit or retry interval.
+
+**A direct Scene fails decoding**
+- Check the reported missing or empty chunk indices under `_MoonliteV3Data`.
+- A complete container can be rebuilt with `Container.Create`; a truly missing source chunk must be restored from an authoritative copy.
 
 **A window fails decoding**
 - Check that the packet header and all values were saved.

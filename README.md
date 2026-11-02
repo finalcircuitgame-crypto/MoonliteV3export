@@ -16,13 +16,7 @@ This downloads and executes the latest `MoonliteTool.lua` from the repository's 
 
 This repository is public, so the raw GitHub URL can be fetched without an account token.
 
-To use that exact one-line loader, either:
-- make the repository public; or
-- publish the script through another HTTPS location that your executor can access.
-
-Do **not** put a GitHub personal access token into the loader or a script shared with other people. Anyone who obtains the script could extract the token.
-
-If you want to keep the repository private, open `MoonliteTool.lua` in your local copy and execute its contents through Xeno's editor instead.
+The loader does not require a GitHub personal access token. Do not put a personal access token into an executor script or share one with other people.
 
 ## Requirements
 

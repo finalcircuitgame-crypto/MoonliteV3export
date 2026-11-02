@@ -554,176 +554,473 @@ end
 -- GUI
 --==================================================
 
+local UserInputService = game:GetService("UserInputService")
+
 local gui = Instance.new("ScreenGui")
 gui.Name = "MoonliteCutsceneTool"
 gui.ResetOnSpawn = false
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 50
 
 local main = Instance.new("Frame")
-main.Size = UDim2.fromOffset(550, 535)
-main.Position = UDim2.new(0.5, -275, 0.5, -267)
-main.BackgroundColor3 = Color3.fromRGB(25, 28, 35)
+main.Name = "Window"
+main.Size = UDim2.fromOffset(700, 650)
+main.Position = UDim2.new(0.5, -350, 0.5, -325)
+main.BackgroundColor3 = Color3.fromRGB(16, 19, 27)
 main.BorderSizePixel = 0
+main.ClipsDescendants = true
 main.Parent = gui
 
-Instance.new("UICorner", main).CornerRadius =
-    UDim.new(0, 10)
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 14)
+mainCorner.Parent = main
 
-local function makeLabel(text, y, height, size, bold)
-    local label = Instance.new("TextLabel")
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(67, 83, 112)
+mainStroke.Transparency = 0.35
+mainStroke.Thickness = 1.2
+mainStroke.Parent = main
 
-    label.Size = UDim2.new(1, -24, 0, height)
-    label.Position = UDim2.fromOffset(12, y)
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Size = UDim2.new(1, 0, 0, 66)
+topBar.BackgroundColor3 = Color3.fromRGB(29, 40, 61)
+topBar.BorderSizePixel = 0
+topBar.Parent = main
 
-    label.BackgroundTransparency = 1
-    label.Text = text
-    label.TextColor3 = Color3.fromRGB(235, 238, 245)
+local topGradient = Instance.new("UIGradient")
+topGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(37, 62, 98)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(30, 36, 57)),
+})
+topGradient.Rotation = 0
+topGradient.Parent = topBar
 
-    label.TextXAlignment = Enum.TextXAlignment.Left
-    label.TextYAlignment = Enum.TextYAlignment.Center
+local topCorner = Instance.new("UICorner")
+topCorner.CornerRadius = UDim.new(0, 14)
+topCorner.Parent = topBar
 
-    label.Font = bold
-        and Enum.Font.GothamBold
-        or Enum.Font.Gotham
+local topFill = Instance.new("Frame")
+topFill.Size = UDim2.new(1, 0, 0, 15)
+topFill.Position = UDim2.new(0, 0, 1, -15)
+topFill.BackgroundColor3 = Color3.fromRGB(30, 36, 57)
+topFill.BorderSizePixel = 0
+topFill.Parent = topBar
 
-    label.TextSize = size or 12
-    label.Parent = main
+local brand = Instance.new("TextLabel")
+brand.Size = UDim2.new(1, -110, 0, 29)
+brand.Position = UDim2.fromOffset(20, 9)
+brand.BackgroundTransparency = 1
+brand.Text = "MOONLITE  /  V3 CUTSCENE TOOL"
+brand.TextColor3 = Color3.fromRGB(245, 248, 255)
+brand.TextXAlignment = Enum.TextXAlignment.Left
+brand.Font = Enum.Font.GothamBold
+brand.TextSize = 18
+brand.Parent = topBar
 
-    return label
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, -110, 0, 18)
+subtitle.Position = UDim2.fromOffset(21, 37)
+subtitle.BackgroundTransparency = 1
+subtitle.Text = "STREAM CAPTURE     •     DECODE     •     RECONSTRUCT"
+subtitle.TextColor3 = Color3.fromRGB(174, 195, 224)
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.Font = Enum.Font.GothamMedium
+subtitle.TextSize = 10
+subtitle.Parent = topBar
+
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.fromOffset(34, 34)
+closeButton.Position = UDim2.new(1, -48, 0, 16)
+closeButton.BackgroundColor3 = Color3.fromRGB(57, 65, 84)
+closeButton.BackgroundTransparency = 0.12
+closeButton.Text = "×"
+closeButton.TextColor3 = Color3.fromRGB(240, 244, 250)
+closeButton.Font = Enum.Font.GothamMedium
+closeButton.TextSize = 23
+closeButton.Parent = topBar
+Instance.new("UICorner", closeButton).CornerRadius = UDim.new(0, 8)
+closeButton.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+-- Make the window draggable from its title bar.
+do
+    local dragging = false
+    local dragInput
+    local dragStart
+    local startPosition
+
+    topBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPosition = main.Position
+
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    topBar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input == dragInput then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(
+                startPosition.X.Scale,
+                startPosition.X.Offset + delta.X,
+                startPosition.Y.Scale,
+                startPosition.Y.Offset + delta.Y
+            )
+        end
+    end)
 end
 
-local function makeButton(text, position, size, color)
-    local button = Instance.new("TextButton")
+local function makeSection(parent, title, position, size)
+    local panel = Instance.new("Frame")
+    panel.Position = position
+    panel.Size = size
+    panel.BackgroundColor3 = Color3.fromRGB(23, 28, 39)
+    panel.BorderSizePixel = 0
+    panel.Parent = parent
+    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 10)
 
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(58, 69, 91)
+    stroke.Transparency = 0.55
+    stroke.Thickness = 1
+    stroke.Parent = panel
+
+    local heading = Instance.new("TextLabel")
+    heading.Size = UDim2.new(1, -24, 0, 22)
+    heading.Position = UDim2.fromOffset(12, 7)
+    heading.BackgroundTransparency = 1
+    heading.Text = title
+    heading.TextColor3 = Color3.fromRGB(171, 190, 218)
+    heading.TextXAlignment = Enum.TextXAlignment.Left
+    heading.Font = Enum.Font.GothamBold
+    heading.TextSize = 10
+    heading.Parent = panel
+
+    return panel
+end
+
+local function makeButton(parent, text, position, size, color)
+    local button = Instance.new("TextButton")
     button.Position = position
     button.Size = size
-
     button.BackgroundColor3 = color
-    button.TextColor3 = Color3.new(1, 1, 1)
-
+    button.TextColor3 = Color3.fromRGB(246, 248, 252)
     button.Text = text
     button.Font = Enum.Font.GothamBold
     button.TextSize = 12
+    button.AutoButtonColor = true
+    button.Parent = parent
+    Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
 
-    button.Parent = main
-
-    Instance.new("UICorner", button).CornerRadius =
-        UDim.new(0, 6)
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = Color3.fromRGB(255, 255, 255)
+    stroke.Transparency = 0.88
+    stroke.Thickness = 1
+    stroke.Parent = button
 
     return button
 end
 
-makeLabel(
-    "MOONLITE V3 CUTSCENE TOOL",
-    10,
-    28,
-    16,
-    true
+-- Cutscene library panel.
+local libraryPanel = makeSection(
+    main,
+    "CUTSCENE LIBRARY",
+    UDim2.fromOffset(14, 80),
+    UDim2.new(1, -28, 0, 190)
 )
 
-local selectedLabel = makeLabel(
-    "Selected: None",
-    40,
-    22,
-    12,
-    true
-)
+local selectedLabel = Instance.new("TextLabel")
+selectedLabel.Size = UDim2.new(1, -130, 0, 22)
+selectedLabel.Position = UDim2.fromOffset(13, 31)
+selectedLabel.BackgroundTransparency = 1
+selectedLabel.Text = "No cutscene selected"
+selectedLabel.TextColor3 = Color3.fromRGB(236, 241, 250)
+selectedLabel.TextXAlignment = Enum.TextXAlignment.Left
+selectedLabel.Font = Enum.Font.GothamSemibold
+selectedLabel.TextSize = 12
+selectedLabel.TextTruncate = Enum.TextTruncate.AtEnd
+selectedLabel.Parent = libraryPanel
 
-local status = makeLabel(
-    "Ready.",
-    396,
-    22,
-    11,
-    true
+local refreshButton = makeButton(
+    libraryPanel,
+    "↻  REFRESH",
+    UDim2.new(1, -112, 0, 27),
+    UDim2.fromOffset(98, 28),
+    Color3.fromRGB(56, 76, 108)
 )
-
---==================================================
--- PACKAGE LIST
---==================================================
 
 local packageList = Instance.new("ScrollingFrame")
-
-packageList.Position = UDim2.fromOffset(12, 72)
-packageList.Size = UDim2.new(1, -24, 0, 125)
-
-packageList.BackgroundColor3 = Color3.fromRGB(17, 19, 25)
+packageList.Name = "PackageList"
+packageList.Position = UDim2.fromOffset(12, 62)
+packageList.Size = UDim2.new(1, -24, 1, -72)
+packageList.BackgroundColor3 = Color3.fromRGB(15, 19, 28)
 packageList.BorderSizePixel = 0
-packageList.ScrollBarThickness = 5
+packageList.ScrollBarThickness = 4
+packageList.ScrollBarImageColor3 = Color3.fromRGB(91, 124, 172)
+packageList.CanvasSize = UDim2.fromOffset(0, 0)
+packageList.Parent = libraryPanel
+Instance.new("UICorner", packageList).CornerRadius = UDim.new(0, 7)
 
-packageList.Parent = main
+local packageLayout = Instance.new("UIListLayout")
+packageLayout.Padding = UDim.new(0, 4)
+packageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+packageLayout.Parent = packageList
 
-local layout = Instance.new("UIListLayout")
-layout.Padding = UDim.new(0, 3)
-layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Parent = packageList
-
-layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    packageList.CanvasSize = UDim2.fromOffset(
-        0,
-        layout.AbsoluteContentSize.Y + 6
-    )
+packageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    packageList.CanvasSize = UDim2.fromOffset(0, packageLayout.AbsoluteContentSize.Y + 8)
 end)
 
---==================================================
--- CAPTURE ROOT
---==================================================
-
-makeLabel(
-    "Local capture folder",
-    205,
-    20,
-    11,
-    false
+-- Capture folder panel.
+local capturePanel = makeSection(
+    main,
+    "LOCAL CAPTURE STORAGE",
+    UDim2.fromOffset(14, 282),
+    UDim2.new(1, -28, 0, 79)
 )
 
 local pathBox = Instance.new("TextBox")
-
-pathBox.Position = UDim2.fromOffset(12, 227)
+pathBox.Name = "CaptureRoot"
+pathBox.Position = UDim2.fromOffset(12, 34)
 pathBox.Size = UDim2.new(1, -24, 0, 32)
-
-pathBox.BackgroundColor3 = Color3.fromRGB(42, 46, 56)
-pathBox.TextColor3 = Color3.new(1, 1, 1)
-
-pathBox.Text = "MoonliteCapture"
+pathBox.BackgroundColor3 = Color3.fromRGB(14, 18, 27)
+pathBox.TextColor3 = Color3.fromRGB(240, 244, 250)
+pathBox.PlaceholderColor3 = Color3.fromRGB(125, 139, 160)
 pathBox.PlaceholderText = "MoonliteCapture"
+pathBox.Text = "MoonliteCapture"
 pathBox.ClearTextOnFocus = false
-
 pathBox.Font = Enum.Font.Code
-pathBox.TextSize = 13
-pathBox.Parent = main
+pathBox.TextSize = 12
+pathBox.TextXAlignment = Enum.TextXAlignment.Left
+pathBox.Parent = capturePanel
+Instance.new("UICorner", pathBox).CornerRadius = UDim.new(0, 7)
 
-Instance.new("UICorner", pathBox).CornerRadius =
-    UDim.new(0, 6)
+local pathPadding = Instance.new("UIPadding")
+pathPadding.PaddingLeft = UDim.new(0, 10)
+pathPadding.Parent = pathBox
 
---==================================================
--- LOG
---==================================================
+-- Workflow actions.
+local acquireButton = makeButton(
+    main,
+    "ACQUIRE  +  DECODE  +  MERGE",
+    UDim2.fromOffset(14, 372),
+    UDim2.new(0.5, -21, 0, 42),
+    Color3.fromRGB(34, 133, 99)
+)
 
-local logBox = Instance.new("TextLabel")
+local importButton = makeButton(
+    main,
+    "IMPORT EXISTING CAPTURE",
+    UDim2.new(0.5, 7, 0, 372),
+    UDim2.new(0.5, -21, 0, 42),
+    Color3.fromRGB(61, 91, 139)
+)
 
-logBox.Position = UDim2.fromOffset(12, 434)
-logBox.Size = UDim2.new(1, -24, 0, 88)
+local exportButton = makeButton(
+    main,
+    "⇩   EXPORT RECONSTRUCTED MODEL",
+    UDim2.fromOffset(14, 422),
+    UDim2.new(1, -28, 0, 34),
+    Color3.fromRGB(91, 71, 137)
+)
 
-logBox.BackgroundColor3 = Color3.fromRGB(15, 17, 22)
-logBox.TextColor3 = Color3.fromRGB(215, 220, 230)
+-- Status strip.
+local statusPanel = Instance.new("Frame")
+statusPanel.Position = UDim2.fromOffset(14, 466)
+statusPanel.Size = UDim2.new(1, -28, 0, 27)
+statusPanel.BackgroundColor3 = Color3.fromRGB(28, 36, 50)
+statusPanel.BorderSizePixel = 0
+statusPanel.Parent = main
+Instance.new("UICorner", statusPanel).CornerRadius = UDim.new(0, 7)
 
-logBox.TextXAlignment = Enum.TextXAlignment.Left
-logBox.TextYAlignment = Enum.TextYAlignment.Top
-logBox.TextWrapped = true
+local statusDot = Instance.new("Frame")
+statusDot.Size = UDim2.fromOffset(7, 7)
+statusDot.Position = UDim2.fromOffset(10, 10)
+statusDot.BackgroundColor3 = Color3.fromRGB(100, 194, 150)
+statusDot.BorderSizePixel = 0
+statusDot.Parent = statusPanel
+Instance.new("UICorner", statusDot).CornerRadius = UDim.new(1, 0)
 
-logBox.Font = Enum.Font.Code
-logBox.TextSize = 10
-logBox.Text = "Log:\nSelect a cutscene."
+local status = Instance.new("TextLabel")
+status.Position = UDim2.fromOffset(25, 0)
+status.Size = UDim2.new(1, -35, 1, 0)
+status.BackgroundTransparency = 1
+status.Text = "Ready — select a stream package"
+status.TextColor3 = Color3.fromRGB(207, 218, 234)
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Font = Enum.Font.GothamMedium
+status.TextSize = 11
+status.Parent = statusPanel
 
-logBox.Parent = main
+-- Live log panel with one UI row per event.
+local logPanel = makeSection(
+    main,
+    "LIVE ACTIVITY",
+    UDim2.fromOffset(14, 502),
+    UDim2.new(1, -28, 1, -516)
+)
 
-Instance.new("UICorner", logBox).CornerRadius =
-    UDim.new(0, 6)
+local logCount = Instance.new("TextLabel")
+logCount.Size = UDim2.fromOffset(90, 20)
+logCount.Position = UDim2.new(1, -102, 0, 7)
+logCount.BackgroundTransparency = 1
+logCount.Text = "0 EVENTS"
+logCount.TextColor3 = Color3.fromRGB(126, 147, 178)
+logCount.TextXAlignment = Enum.TextXAlignment.Right
+logCount.Font = Enum.Font.GothamBold
+logCount.TextSize = 9
+logCount.Parent = logPanel
 
-local function log(message)
-    logBox.Text ..= "\n" .. tostring(message)
+local logScroll = Instance.new("ScrollingFrame")
+logScroll.Name = "LogFeed"
+logScroll.Position = UDim2.fromOffset(10, 32)
+logScroll.Size = UDim2.new(1, -20, 1, -42)
+logScroll.BackgroundColor3 = Color3.fromRGB(13, 17, 25)
+logScroll.BorderSizePixel = 0
+logScroll.ScrollBarThickness = 4
+logScroll.ScrollBarImageColor3 = Color3.fromRGB(91, 124, 172)
+logScroll.CanvasSize = UDim2.fromOffset(0, 0)
+logScroll.AutomaticCanvasSize = Enum.AutomaticSize.None
+logScroll.Parent = logPanel
+Instance.new("UICorner", logScroll).CornerRadius = UDim.new(0, 7)
+
+local logLayout = Instance.new("UIListLayout")
+logLayout.Padding = UDim.new(0, 2)
+logLayout.SortOrder = Enum.SortOrder.LayoutOrder
+logLayout.Parent = logScroll
+
+local logPadding = Instance.new("UIPadding")
+logPadding.PaddingTop = UDim.new(0, 5)
+logPadding.PaddingBottom = UDim.new(0, 5)
+logPadding.PaddingLeft = UDim.new(0, 6)
+logPadding.PaddingRight = UDim.new(0, 6)
+logPadding.Parent = logScroll
+
+local eventCount = 0
+local MAX_LOG_EVENTS = 150
+
+local function scrollLogToBottom()
+    task.defer(function()
+        local height = logLayout.AbsoluteContentSize.Y + 12
+        logScroll.CanvasSize = UDim2.fromOffset(0, height)
+        local maxY = math.max(0, height - logScroll.AbsoluteWindowSize.Y)
+        logScroll.CanvasPosition = Vector2.new(0, maxY)
+    end)
 end
 
+logLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(scrollLogToBottom)
+
+local function log(message)
+    eventCount += 1
+    local text = tostring(message)
+    local lower = text:lower()
+
+    local tag = "INFO"
+    local color = Color3.fromRGB(196, 210, 230)
+    local accent = Color3.fromRGB(104, 153, 216)
+
+    if lower:find("error", 1, true) or lower:find("failed", 1, true)
+        or lower:find("conflict", 1, true) then
+        tag = "ERROR"
+        color = Color3.fromRGB(255, 137, 137)
+        accent = Color3.fromRGB(235, 84, 84)
+    elseif lower:find("complete", 1, true) or lower:find("passed", 1, true)
+        or lower:find("created:", 1, true) or lower:find("exported", 1, true) then
+        tag = "DONE"
+        color = Color3.fromRGB(133, 225, 178)
+        accent = Color3.fromRGB(67, 190, 132)
+    elseif lower:find("warning", 1, true) or lower:find("missing", 1, true) then
+        tag = "WARN"
+        color = Color3.fromRGB(255, 203, 125)
+        accent = Color3.fromRGB(230, 164, 67)
+    end
+
+    local row = Instance.new("Frame")
+    row.Name = "Event_" .. eventCount
+    row.Size = UDim2.new(1, -2, 0, 24)
+    row.BackgroundColor3 = Color3.fromRGB(20, 25, 35)
+    row.BackgroundTransparency = 0.12
+    row.BorderSizePixel = 0
+    row.LayoutOrder = eventCount
+    row.Parent = logScroll
+    Instance.new("UICorner", row).CornerRadius = UDim.new(0, 4)
+
+    local stripe = Instance.new("Frame")
+    stripe.Size = UDim2.new(0, 3, 1, -8)
+    stripe.Position = UDim2.fromOffset(4, 4)
+    stripe.BackgroundColor3 = accent
+    stripe.BorderSizePixel = 0
+    stripe.Parent = row
+    Instance.new("UICorner", stripe).CornerRadius = UDim.new(1, 0)
+
+    local timeLabel = Instance.new("TextLabel")
+    timeLabel.Position = UDim2.fromOffset(13, 0)
+    timeLabel.Size = UDim2.fromOffset(62, 24)
+    timeLabel.BackgroundTransparency = 1
+    timeLabel.Text = os.date("%H:%M:%S")
+    timeLabel.TextColor3 = Color3.fromRGB(116, 135, 162)
+    timeLabel.Font = Enum.Font.Code
+    timeLabel.TextSize = 10
+    timeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    timeLabel.Parent = row
+
+    local tagLabel = Instance.new("TextLabel")
+    tagLabel.Position = UDim2.fromOffset(76, 0)
+    tagLabel.Size = UDim2.fromOffset(42, 24)
+    tagLabel.BackgroundTransparency = 1
+    tagLabel.Text = tag
+    tagLabel.TextColor3 = accent
+    tagLabel.Font = Enum.Font.GothamBold
+    tagLabel.TextSize = 9
+    tagLabel.TextXAlignment = Enum.TextXAlignment.Left
+    tagLabel.Parent = row
+
+    local messageLabel = Instance.new("TextLabel")
+    messageLabel.Position = UDim2.fromOffset(118, 0)
+    messageLabel.Size = UDim2.new(1, -126, 1, 0)
+    messageLabel.BackgroundTransparency = 1
+    messageLabel.Text = text
+    messageLabel.TextColor3 = color
+    messageLabel.TextXAlignment = Enum.TextXAlignment.Left
+    messageLabel.TextYAlignment = Enum.TextYAlignment.Center
+    messageLabel.TextWrapped = true
+    messageLabel.TextTruncate = Enum.TextTruncate.AtEnd
+    messageLabel.Font = Enum.Font.Gotham
+    messageLabel.TextSize = 10
+    messageLabel.Parent = row
+
+    if eventCount > MAX_LOG_EVENTS then
+        local oldest
+        for _, child in ipairs(logScroll:GetChildren()) do
+            if child:IsA("Frame") and child.Name:match("^Event_") then
+                if not oldest or child.LayoutOrder < oldest.LayoutOrder then
+                    oldest = child
+                end
+            end
+        end
+        if oldest then oldest:Destroy() end
+    end
+
+    logCount.Text = tostring(math.min(eventCount, MAX_LOG_EVENTS)) .. " EVENTS"
+    scrollLogToBottom()
+end
+
+log("Interface initialized.")
 --==================================================
 -- STATE
 --==================================================
@@ -774,12 +1071,13 @@ local function refreshPackages()
     for index, entry in ipairs(found) do
         local button = Instance.new("TextButton")
 
-        button.Size = UDim2.new(1, -8, 0, 27)
-        button.BackgroundColor3 = Color3.fromRGB(47, 52, 64)
+        button.Size = UDim2.new(1, -8, 0, 30)
+        button.BackgroundColor3 = Color3.fromRGB(35, 43, 58)
 
-        button.TextColor3 = Color3.new(1, 1, 1)
+        button.TextColor3 = Color3.fromRGB(226, 235, 248)
+        button.TextXAlignment = Enum.TextXAlignment.Left
         button.Text = string.format(
-            "%s  [%d windows]",
+            "   %s       •       %d windows",
             entry.Package.Name,
             entry.Count
         )
@@ -792,10 +1090,17 @@ local function refreshPackages()
         button.MouseButton1Click:Connect(function()
             selectedPackage = entry.Package
 
-            selectedLabel.Text =
-                "Selected: " .. entry.Package.Name
+            for _, sibling in ipairs(packageList:GetChildren()) do
+                if sibling:IsA("TextButton") then
+                    sibling.BackgroundColor3 = Color3.fromRGB(35, 43, 58)
+                end
+            end
+            button.BackgroundColor3 = Color3.fromRGB(47, 91, 134)
 
-            status.Text = "Ready."
+            selectedLabel.Text = "SELECTED  /  " .. entry.Package.Name
+            status.Text = "Ready — " .. entry.Package.Name
+            statusDot.BackgroundColor3 = Color3.fromRGB(100, 194, 150)
+            log("Selected package: " .. entry.Package.Name)
         end)
     end
 
@@ -868,6 +1173,7 @@ local function process(useAcquisition)
             end
 
             status.Text = "Merging windows..."
+            statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
 
             local merged, stats = mergeWindows(
                 manifest,
@@ -879,6 +1185,7 @@ local function process(useAcquisition)
             log("Duplicate boundary keys: " .. stats.DuplicateKeys)
 
             status.Text = "Creating final Scene..."
+            statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
 
             local outputScene = Container.Create(merged)
             outputScene.Name = "Scene"
@@ -907,11 +1214,13 @@ local function process(useAcquisition)
             log("Frames: " .. tostring(merged.Frames))
             log("Tracks: " .. #merged.Tracks)
 
-            status.Text = "Complete! Scene is in Workspace."
+            status.Text = "Complete — reconstructed Scene is in Workspace."
+            statusDot.BackgroundColor3 = Color3.fromRGB(83, 204, 145)
         end)
 
         if not ok then
             status.Text = "Processing failed."
+            statusDot.BackgroundColor3 = Color3.fromRGB(235, 91, 91)
             log("ERROR: " .. tostring(err))
             warn("[Moonlite Tool]", err)
         end

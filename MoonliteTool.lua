@@ -1234,33 +1234,67 @@ importButton.MouseButton1Click:Connect(function()
     process(false)
 end)
 
+-- Universal Syn Save Instance engine, loaded only when export is requested.
+-- Credit: UniversalSynSaveInstance https://discord.gg/wx4ThpAsmw
+local universalSaveInstance
+
 exportButton.MouseButton1Click:Connect(function()
     if not outputFolder or not outputFolder.Parent then
         status.Text = "Nothing to export."
         return
     end
 
-    local saveinstance = getAPI("saveinstance")
-
-    if type(saveinstance) ~= "function" then
-        status.Text = "saveinstance() unavailable."
-        return
-    end
-
-    status.Text = "Exporting Workspace folder..."
+    status.Text = "Preparing Universal Syn Save Instance..."
+    statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
 
     local ok, err = pcall(function()
-        saveinstance({
-            Object = outputFolder,
-        })
+        if not universalSaveInstance then
+            local HttpService = game:GetService("HttpService")
+            local cacheToken = HttpService:GenerateGUID(false)
+
+            local sourceUrl =
+                "https://raw.githubusercontent.com/finalcircuitgame-crypto/UniversalSynSaveInstance/main/saveinstance.luau"
+                .. "?_ussi_nocache="
+                .. cacheToken
+
+            log("Downloading Universal Syn Save Instance engine...")
+            local source = game:HttpGet(sourceUrl, true)
+
+            assert(
+                type(source) == "string" and #source > 1000,
+                "Universal Syn Save Instance download was empty or incomplete."
+            )
+
+            local compiler, compileError = loadstring(source, "@UniversalSynSaveInstance")
+            assert(
+                type(compiler) == "function",
+                "Universal Syn Save Instance compile failed: " .. tostring(compileError)
+            )
+
+            local engine = compiler()
+            assert(
+                type(engine) == "function",
+                "Universal Syn Save Instance did not return its save function."
+            )
+
+            universalSaveInstance = engine
+            log("Universal Syn Save Instance loaded.")
+        end
+
+        status.Text = "Exporting reconstructed model..."
+        -- Passing an Instance directly sets Object and exports only that model.
+        universalSaveInstance(outputFolder)
     end)
 
     if ok then
-        status.Text = "SaveInstance completed. Check its output location."
-        log("Exported " .. outputFolder.Name)
+        status.Text = "Export completed. Check the executor's output location."
+        statusDot.BackgroundColor3 = Color3.fromRGB(83, 204, 145)
+        log("USSI exported " .. outputFolder.Name)
     else
-        status.Text = "SaveInstance failed."
-        log(tostring(err))
+        status.Text = "Export failed."
+        statusDot.BackgroundColor3 = Color3.fromRGB(235, 91, 91)
+        log("USSI ERROR: " .. tostring(err))
+        warn("[Moonlite Tool / USSI]", err)
     end
 end)
 

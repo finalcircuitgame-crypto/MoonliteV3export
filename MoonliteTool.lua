@@ -192,6 +192,306 @@ local function inspectMissingChunks(scene)
     return details
 end
 
+--==================================================
+-- ORIGINAL CONTAINER BACKUP
+--==================================================
+
+local function sanitizeFileName(value)
+    local name = tostring(value):gsub("[^%w_%-]", "_")
+    return if name == "" then "MoonlitePackage" else name
+end
+
+local function backupOriginalContainer(package, scene, captureRoot, log, verifiedDocument)
+    assert(
+        scene and scene:IsA("StringValue") and Container.IsContainer(scene),
+        "Original Scene is not a Moonlite V3 container."
+    )
+    assert(
+        type(captureRoot) == "string" and captureRoot:gsub("%s", "") ~= "",
+        "Capture folder is empty."
+    )
+
+    local writefile = requireAPI("writefile")
+    local readfile = requireAPI("readfile")
+    local HttpService = game:GetService("HttpService")
+    ensureFolder(captureRoot)
+
+    local metadataOK, metadata = pcall(Container.GetMetadata, scene)
+    if not metadataOK or type(metadata) ~= "table" then
+        metadata = {}
+    end
+
+    local expectedCount = tonumber(metadata.ChunkCount)
+    if not expectedCount or expectedCount < 1 or expectedCount % 1 ~= 0 then
+        expectedCount = nil
+    end
+
+    local dataFolder = scene:FindFirstChild("_MoonliteV3Data")
+    local numberedChildren = {}
+
+    if dataFolder then
+        for _, child in ipairs(dataFolder:GetChildren()) do
+            local index = tonumber(child.Name)
+            if index and index >= 1 and index % 1 == 0 then
+                numberedChildren[index] = child
+            end
+        end
+    end
+
+    local indices, validChunks, invalidChunks, missingChunks = {}, {}, {}, {}
+
+    for index, child in pairs(numberedChildren) do
+        table.insert(indices, index)
+        if not child:IsA("StringValue") or child.Value == "" then
+            table.insert(invalidChunks, index)
+        else
+            table.insert(validChunks, {Index = index, Value = child.Value})
+        end
+    end
+
+    table.sort(indices)
+    table.sort(validChunks, function(a, b) return a.Index < b.Index end)
+    table.sort(invalidChunks)
+
+    if expectedCount then
+        for index = 1, expectedCount do
+            local child = numberedChildren[index]
+            if not child then
+                table.insert(missingChunks, index)
+            end
+        end
+    elseif not dataFolder then
+        table.insert(missingChunks, 1)
+    end
+
+    local timestamp = os.date("%Y%m%d_%H%M%S")
+    local token = HttpService:GenerateGUID(false):gsub("%-", ""):sub(1, 8)
+    local backupFolderName = string.format(
+        "%s_OriginalContainer_%s_%s",
+        sanitizeFileName(package.Name),
+        timestamp,
+        token
+    )
+    local backupPath = joinPath(captureRoot, backupFolderName)
+    ensureFolder(backupPath)
+
+    local function writeVerified(path, content)
+        local writeOK, writeError = pcall(writefile, path, content)
+        if not writeOK then
+            return false, tostring(writeError)
+        end
+
+        local readOK, savedContent = pcall(readfile, path)
+        if not readOK then
+            return false, "Read-back failed: " .. tostring(savedContent)
+        end
+        if savedContent ~= content then
+            return false, "Read-back does not match the source."
+        end
+        return true
+    end
+
+    local report = {
+        "MOONLITE V3 ORIGINAL CONTAINER BACKUP",
+        "=====================================",
+        "Package: " .. package.Name,
+        "Created: " .. os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        "Backup folder: " .. backupPath,
+        "Expected chunks: " .. tostring(expectedCount or "Unknown"),
+        "Numbered entries found: " .. #indices,
+        "Valid StringValue chunks found: " .. #validChunks,
+    }
+
+    local headerValue = scene.Value
+    local headerSaved, headerError = writeVerified(
+        joinPath(backupPath, "SceneHeader.txt"),
+        headerValue
+    )
+    table.insert(report, "SceneHeader.txt: " .. (headerSaved and "SAVED + VERIFIED" or ("FAILED | " .. tostring(headerError))))
+    table.insert(report, "Header characters: " .. #headerValue)
+
+    local chunkFiles, failedWrites = {}, {}
+    local totalCharacters, savedCount = 0, 0
+
+    for position, chunk in ipairs(validChunks) do
+        local fileName = string.format("chunk_%04d.txt", chunk.Index)
+        local saved, saveError = writeVerified(
+            joinPath(backupPath, fileName),
+            chunk.Value
+        )
+        totalCharacters += #chunk.Value
+
+        if saved then
+            savedCount += 1
+            table.insert(chunkFiles, {
+                Index = chunk.Index,
+                File = fileName,
+                Characters = #chunk.Value,
+                Status = "SAVED_VERIFIED",
+            })
+            table.insert(report, string.format(
+                "Chunk %d: SAVED + VERIFIED | %d characters",
+                chunk.Index,
+                #chunk.Value
+            ))
+        else
+            table.insert(failedWrites, string.format("%d: %s", chunk.Index, tostring(saveError)))
+            table.insert(chunkFiles, {
+                Index = chunk.Index,
+                File = fileName,
+                Characters = #chunk.Value,
+                Status = "FAILED",
+                Error = tostring(saveError),
+            })
+            table.insert(report, string.format(
+                "Chunk %d: FAILED | %s",
+                chunk.Index,
+                tostring(saveError)
+            ))
+        end
+
+        if position < #validChunks then
+            task.wait()
+        end
+    end
+
+    local containerReadOK, decodedDocument
+    if verifiedDocument ~= nil then
+        containerReadOK, decodedDocument = true, verifiedDocument
+    else
+        containerReadOK, decodedDocument = pcall(Container.Read, scene)
+    end
+
+    local documentValid, validationError = false, nil
+    if containerReadOK and decodedDocument then
+        local validationOK, valid, issues = pcall(Document.Validate, decodedDocument)
+        documentValid = validationOK and valid == true
+        if not documentValid then
+            validationError = validationOK and "Document.Validate returned false." or tostring(valid)
+            if validationOK and type(issues) == "table" then
+                validationError ..= " (" .. #issues .. " issue(s))"
+            end
+        end
+    else
+        validationError = tostring(decodedDocument)
+    end
+
+    local sourceComplete =
+        headerSaved
+        and containerReadOK
+        and documentValid
+        and #missingChunks == 0
+        and #invalidChunks == 0
+        and #failedWrites == 0
+        and savedCount == #validChunks
+        and (not expectedCount or savedCount == expectedCount)
+
+    local function joinNumbers(values)
+        local labels = {}
+        for _, value in ipairs(values) do
+            table.insert(labels, tostring(value))
+        end
+        return #labels > 0 and table.concat(labels, ", ") or "None"
+    end
+
+    table.insert(report, "")
+    table.insert(report, "Container.Read: " .. (containerReadOK and "PASS" or "FAIL"))
+    table.insert(report, "Document.Validate: " .. (documentValid and "PASS" or "FAIL"))
+    table.insert(report, "Missing chunks: " .. joinNumbers(missingChunks))
+    table.insert(report, "Invalid/empty chunks: " .. joinNumbers(invalidChunks))
+    table.insert(report, "Failed writes: " .. #failedWrites)
+    table.insert(report, "Saved chunks: " .. savedCount .. "/" .. tostring(expectedCount or #validChunks))
+    table.insert(report, "Total chunk characters: " .. totalCharacters)
+    table.insert(report, "Payload status: " .. (sourceComplete and "COMPLETE" or "PARTIAL"))
+    if validationError then
+        table.insert(report, "Validation detail: " .. validationError)
+    end
+
+    local manifest = {
+        Format = "MoonliteV3OriginalContainerBackup",
+        Version = 1,
+        Package = package.Name,
+        CreatedAt = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+        SourceScene = scene:GetFullName(),
+        HeaderFile = "SceneHeader.txt",
+        ExpectedChunkCount = expectedCount,
+        FoundNumberedEntries = #indices,
+        SavedChunkCount = savedCount,
+        TotalChunkCharacters = totalCharacters,
+        ContainerRead = containerReadOK,
+        DocumentValid = documentValid,
+        PayloadStatus = if sourceComplete then "COMPLETE" else "PARTIAL",
+        Metadata = metadata,
+        Chunks = chunkFiles,
+        MissingChunks = missingChunks,
+        InvalidChunks = invalidChunks,
+        FailedWrites = failedWrites,
+    }
+
+    local manifestEncodeOK, manifestJSON = pcall(function()
+        return HttpService:JSONEncode(manifest)
+    end)
+
+    local manifestOK, manifestError = false, nil
+    if manifestEncodeOK then
+        manifestOK, manifestError = writeVerified(
+            joinPath(backupPath, "manifest.json"),
+            manifestJSON
+        )
+    else
+        manifestError = manifestJSON
+    end
+    table.insert(report, "manifest.json: " .. (manifestOK and "SAVED + VERIFIED" or ("FAILED | " .. tostring(manifestError))))
+
+    local reportOK, reportError = writeVerified(
+        joinPath(backupPath, "REPORT.txt"),
+        table.concat(report, "\n")
+    )
+
+    if sourceComplete and manifestOK and reportOK then
+        local markerOK, markerError = writeVerified(
+            joinPath(backupPath, "COMPLETE.txt"),
+            "Status=COMPLETE\nChunks=" .. savedCount .. "\n"
+        )
+        if not markerOK and log then
+            log("Completion marker write failed: " .. tostring(markerError))
+        end
+    else
+        writeVerified(
+            joinPath(backupPath, "PARTIAL.txt"),
+            "Status=PARTIAL\nSee REPORT.txt for missing or failed entries.\n"
+        )
+    end
+
+    if log then
+        log("Original container backup: " .. (sourceComplete and "COMPLETE" or "PARTIAL"))
+        log("Saved " .. savedCount .. " chunk(s) to " .. backupPath)
+        if #missingChunks > 0 then
+            log("Missing source chunks: " .. joinNumbers(missingChunks))
+        end
+        if #invalidChunks > 0 then
+            log("Invalid source chunks: " .. joinNumbers(invalidChunks))
+        end
+        if #failedWrites > 0 then
+            log("Chunk write failures: " .. #failedWrites)
+        end
+        if not manifestOK then
+            log("Manifest write failed: " .. tostring(manifestError))
+        end
+        if not reportOK then
+            log("Report write failed: " .. tostring(reportError))
+        end
+    end
+
+    return {
+        Status = if sourceComplete and manifestOK and reportOK then "COMPLETE" else "PARTIAL",
+        Path = backupPath,
+        SavedChunks = savedCount,
+        ExpectedChunks = expectedCount,
+        TotalCharacters = totalCharacters,
+    }
+end
+
 local function describeContainerFailure(scene, readError)
     local details = inspectMissingChunks(scene)
     local parts = {
@@ -1012,11 +1312,19 @@ local importButton = makeButton(
     Color3.fromRGB(61, 91, 139)
 )
 
+local backupButton = makeButton(
+    main,
+    "BACKUP ORIGINAL CONTAINER",
+    UDim2.fromOffset(14, 422),
+    UDim2.new(0.5, -21, 0, 34),
+    Color3.fromRGB(39, 119, 91)
+)
+
 local exportButton = makeButton(
     main,
-    "⇩   EXPORT RECONSTRUCTED MODEL",
-    UDim2.fromOffset(14, 422),
-    UDim2.new(1, -28, 0, 34),
+    "⇩   EXPORT REBUILT MODEL",
+    UDim2.new(0.5, 7, 0, 422),
+    UDim2.new(0.5, -21, 0, 34),
     Color3.fromRGB(91, 71, 137)
 )
 
@@ -1376,6 +1684,28 @@ local function process(useAcquisition)
                 -- Re-encode it into a fresh Moonlite container without window
                 -- requests, packet import, or boundary-key merging.
                 log("Direct mode: complete document found; no stream acquisition needed.")
+
+                -- Preserve the original serialized Scene before generating
+                -- a Workspace copy or invoking the external SaveInstance tool.
+                status.Text = "Backing up original container chunks..."
+                statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
+
+                local backupOK, backupResult = pcall(function()
+                    return backupOriginalContainer(
+                        package,
+                        manifestScene,
+                        pathBox.Text,
+                        log,
+                        manifest
+                    )
+                end)
+
+                if backupOK then
+                    log("Automatic source backup: " .. backupResult.Status .. " | " .. backupResult.Path)
+                else
+                    log("WARNING: automatic source backup failed; continuing rebuild: " .. tostring(backupResult))
+                end
+
                 status.Text = "Rebuilding direct Scene..."
                 statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
 
@@ -1476,6 +1806,56 @@ end)
 
 importButton.MouseButton1Click:Connect(function()
     process(false)
+end)
+
+backupButton.MouseButton1Click:Connect(function()
+    if busy then
+        status.Text = "Another operation is already running."
+        return
+    end
+
+    if not selectedPackage then
+        status.Text = "Select a cutscene first."
+        return
+    end
+
+    local package = selectedPackage
+    local scene = package:FindFirstChild("Scene")
+
+    if not scene or not Container.IsContainer(scene) then
+        status.Text = "Original Scene container is unavailable."
+        return
+    end
+
+    busy = true
+    status.Text = "Backing up original container..."
+    statusDot.BackgroundColor3 = Color3.fromRGB(232, 177, 84)
+
+    task.spawn(function()
+        local ok, result = pcall(function()
+            return backupOriginalContainer(
+                package,
+                scene,
+                pathBox.Text,
+                log
+            )
+        end)
+
+        if ok then
+            status.Text = "Source backup " .. result.Status .. " — " .. result.SavedChunks .. " chunk(s) saved."
+            statusDot.BackgroundColor3 = if result.Status == "COMPLETE"
+                then Color3.fromRGB(83, 204, 145)
+                else Color3.fromRGB(232, 177, 84)
+            log("Original container backup folder: " .. result.Path)
+        else
+            status.Text = "Original container backup failed."
+            statusDot.BackgroundColor3 = Color3.fromRGB(235, 91, 91)
+            log("BACKUP ERROR: " .. tostring(result))
+            warn("[Moonlite Tool / Backup]", result)
+        end
+
+        busy = false
+    end)
 end)
 
 -- Universal Syn Save Instance engine, loaded only when export is requested.

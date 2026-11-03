@@ -43,16 +43,18 @@ ReplicatedStorage
 4. Stream packets are saved locally under `MoonliteCapture/<PackageName>/`, decoded with `Stream.SceneFromPacket` and `Container.Read`, and verified with `Stream.AssertWindow`.
 5. Stream windows are reassembled using the stream-aware merge algorithm described below.
 6. Both modes create a fresh Moonlite `Scene` under `Workspace/<PackageName>_Reconstructed`.
-7. The generated folder can be exported using [Universal Syn Save Instance](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance). The engine is downloaded only when export is requested.
+7. Direct mode automatically backs up the original serialized `Scene` header and every numbered `_MoonliteV3Data` chunk before rebuilding. The same backup can be started manually for any selected package, including incomplete containers.
+8. The generated folder can be exported using [Universal Syn Save Instance](https://github.com/finalcircuitgame-crypto/UniversalSynSaveInstance). The engine is downloaded only when export is requested.
 
 ## GUI controls
 
 - **Refresh** — rescans `ReplicatedStorage.Assets.CutScenes`.
 - **Cutscene list** — selects a Stream, Direct, Incomplete, or Invalid package.
 - **Local capture folder** — sets the root directory; defaults to `MoonliteCapture`.
-- **Acquire + Decode + Merge** — for Stream packages, requests and merges the windows; for Direct packages, rebuilds the complete document immediately without stream calls.
+- **Acquire + Decode + Merge** — for Stream packages, requests and merges the windows; for Direct packages, first backs up the original container, then rebuilds the complete document without stream calls.
 - **Import Existing Capture** — imports previously saved Stream packets. It is hidden for Direct packages because they have no windows to import.
-- **Export with Universal Syn Save Instance** — downloads `saveinstance.luau` from the linked repository on first use, then calls the returned `synsaveinstance(outputFolder)` function. Passing the generated Folder Instance directly makes it the export target; the rest of the DataModel is not selected.
+- **Backup Original Container** — writes the original `Scene.Value` header and each numbered `_MoonliteV3Data` StringValue to separate files. Every file is read back and compared with its source. A report and JSON manifest record chunk indices, sizes, missing entries, failed writes, and whether `Container.Read` plus `Document.Validate` succeeded. Incomplete packages can still produce a useful partial backup.
+- **Export Rebuilt Model** — downloads `saveinstance.luau` from the linked repository on first use, then calls the returned `synsaveinstance(outputFolder)` function. Passing the generated Folder Instance directly makes it the export target; the rest of the DataModel is not selected.
 
 ## Direct versus Stream packages
 
@@ -63,7 +65,9 @@ A **Stream** package stores a manifest plus separately requested windows. It sti
 An **Incomplete** package is shown in the list with its container error. When the metadata exposes `ChunkCount`, the diagnostic reports missing or empty numbered entries under `_MoonliteV3Data`. Re-encoding can repair the output container only after `Container.Read` succeeds. If a source chunk is genuinely absent (for example, chunk `1`), the tool cannot recreate its contents from the remaining chunks or from the manifest; it needs an authoritative copy of that chunk or of the original complete container.
 ## Local capture layout
 
-For a package named `NIGHT1TESTING`, files are written as:
+Stream packet captures and original-container backups are stored under the same root.
+
+Stream captures use this layout:
 
 ```text
 MoonliteCapture/
@@ -72,16 +76,25 @@ MoonliteCapture/
     ├── window_001/
     │   ├── header.bin
     │   ├── info.txt
-    │   ├── value_0001.bin
-    │   └── value_0002.bin
-    ├── window_002/
-    │   ├── header.bin
-    │   ├── info.txt
     │   └── value_0001.bin
     └── ...
 ```
 
-Each `info.txt` records the window index and number of packet values. If acquisition is interrupted, already-written windows remain on disk and can be inspected or imported.
+Direct source backups use a unique folder per attempt:
+
+```text
+MoonliteCapture/
+└── N3C2_STAGING_OriginalContainer_<timestamp>_<id>/
+    ├── SceneHeader.txt
+    ├── chunk_0001.txt
+    ├── chunk_0002.txt
+    ├── ...
+    ├── manifest.json
+    ├── REPORT.txt
+    └── COMPLETE.txt  (or PARTIAL.txt)
+```
+
+The header and each numbered chunk are written separately—never concatenated into one giant console/clipboard string. Each write is read back and byte-for-byte compared with the source value. `COMPLETE.txt` is emitted only when all expected chunks were saved, the container can be read, and the decoded document passes validation. Otherwise the backup is marked `PARTIAL.txt`, and `REPORT.txt` lists the missing or failed entries.
 
 ## Merge logic
 
@@ -141,9 +154,11 @@ The project must retain the required attribution and license notices from Univer
 - Check that the packet header and all values were saved.
 - Confirm that the game's Moonlite module version matches the capture format.
 
-**SaveInstance fails**
-- Confirm `saveinstance` exists in the executor.
-- Check the executor's console and its configured export destination.
+**SaveInstance fails or Roblox crashes during export**
+- The original container backup is created automatically during Direct reconstruction, before the generated Workspace model is created.
+- Check `MoonliteCapture/<PackageName>_OriginalContainer_.../` for `COMPLETE.txt` and `REPORT.txt`. This backup is independent of USSI and can be used to rebuild the container even when the `.rbxm` export did not finish.
+- For Stream packages or incomplete packages, use **Backup Original Container** before another export attempt.
+- A completed raw-container backup is not itself an `.rbxm`; it preserves the source header and chunk strings for later reconstruction.
 
 ## Project files
 

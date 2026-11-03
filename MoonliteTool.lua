@@ -448,15 +448,17 @@ local function backupOriginalContainer(package, scene, captureRoot, log, verifie
         table.concat(report, "\n")
     )
 
+    local markerOK, markerError = false, nil
     if sourceComplete and manifestOK and reportOK then
-        local markerOK, markerError = writeVerified(
+        markerOK, markerError = writeVerified(
             joinPath(backupPath, "COMPLETE.txt"),
             "Status=COMPLETE\nChunks=" .. savedCount .. "\n"
         )
-        if not markerOK and log then
-            log("Completion marker write failed: " .. tostring(markerError))
-        end
-    else
+    end
+
+    local backupComplete = sourceComplete and manifestOK and reportOK and markerOK
+
+    if not backupComplete then
         writeVerified(
             joinPath(backupPath, "PARTIAL.txt"),
             "Status=PARTIAL\nSee REPORT.txt for missing or failed entries.\n"
@@ -484,7 +486,7 @@ local function backupOriginalContainer(package, scene, captureRoot, log, verifie
     end
 
     return {
-        Status = if sourceComplete and manifestOK and reportOK then "COMPLETE" else "PARTIAL",
+        Status = if backupComplete then "COMPLETE" else "PARTIAL",
         Path = backupPath,
         SavedChunks = savedCount,
         ExpectedChunks = expectedCount,

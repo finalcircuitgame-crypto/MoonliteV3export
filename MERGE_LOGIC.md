@@ -21,3 +21,19 @@ The direct path is:
 5. Parent the new `Scene` under `Workspace/<PackageName>_Reconstructed`.
 
 This reserializes the complete document and generates a fresh `_MoonliteV3Data` chunk layout. It can normalize/rebuild the output container, but it cannot recover source bytes when a required source chunk is already missing. In that case the tool reports the missing numbered chunk so it can be restored from an authoritative copy.
+
+## Original container backup and crash recovery
+
+Rebuilding a Direct document creates a new Workspace container, but exporting that Workspace folder with a separate SaveInstance implementation can still fail independently (for example, if the client runs out of memory). The tool therefore preserves the original source container first.
+
+The backup operation writes:
+
+- SceneHeader.txt: the exact original Scene.Value header and metadata string.
+- chunk_0001.txt, chunk_0002.txt, etc.: each original numbered _MoonliteV3Data StringValue, saved separately and unchanged.
+- manifest.json: package identity, source metadata, expected/found/saved chunk counts, file names, character counts, and validation results.
+- REPORT.txt: a readable summary of the backup, including missing, invalid, and failed chunks.
+- COMPLETE.txt only when every expected chunk was saved and read back exactly, Container.Read succeeded, and Document.Validate passed. Otherwise the folder receives PARTIAL.txt.
+
+Each chunk is written and read back independently. The tool does not join the payload into a console string or clipboard-sized value. In Direct mode this backup is attempted automatically before Container.Create generates the Workspace copy; the manual "Backup Original Container" action is also available for Stream, Incomplete, and Invalid entries to preserve whatever source data remains.
+
+The raw backup is not an .rbxm file. It is a durable copy of the original serialized container inputs that can be decoded or rebuilt later even when a separate SaveInstance export crashes. A partial backup preserves only the chunks actually present; missing source bytes cannot be synthesized from the remaining chunks.
